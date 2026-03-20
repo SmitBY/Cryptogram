@@ -749,7 +749,12 @@ struct ContentView: View {
             return true
         }
 
-        return !rejectedLettersByCode[selectedCode, default: []].contains(letter)
+        if rejectedLettersByCode[selectedCode, default: []].contains(letter) {
+            let remainingHiddenTiles = tiles.filter { $0.normalizedLetter == letter && $0.isHiddenLetter }
+            return remainingHiddenTiles.count > 1
+        }
+
+        return true
     }
 
     private func isFlashingWrong(_ letter: Character) -> Bool {
