@@ -1011,7 +1011,15 @@ struct ContentView: View {
     }
 
     private func keyboardVisibility(for letter: Character) -> Bool {
-        isLetterStillNeeded(letter)
+        if isLetterSolved(letter) {
+            return false
+        }
+
+        if isFirstGameTutorialActive {
+            return isLetterStillNeeded(letter)
+        }
+
+        return true
     }
 
     private func isTutorialHighlightedTile(_ tile: PhraseTile) -> Bool {
