@@ -5,6 +5,7 @@ enum ProgressStorageKey {
     static let completedPhraseIndices = "progress.completedPhraseIndices"
     static let passedPhraseIndices = "progress.passedPhraseIndices"
     static let datasetSignature = "progress.datasetSignature"
+    static let hasCompletedFirstGameTutorial = "tutorial.hasCompletedFirstGameTutorial"
     static let selectedTheme = "settings.selectedTheme"
     static let selectedLanguage = "settings.selectedLanguage"
     static let totalRounds = "stats.totalRounds"

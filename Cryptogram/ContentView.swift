@@ -9,6 +9,13 @@ import Foundation
 import SwiftUI
 
 struct ContentView: View {
+    private enum FirstGameTutorialStep: Equatable {
+        case pickTile
+        case enterLetter
+        case openHintMode
+        case useHint
+    }
+
     private static let maxMistakes = 3
     private static let tileWidth: CGFloat = 24
     private static let tileCellHeight: CGFloat = 30
@@ -19,7 +26,9 @@ struct ContentView: View {
     private static let rowSpacing: CGFloat = 10
     private static let spaceWidth: CGFloat = 6
     private static let wordSpacing: CGFloat = 18
+    private static let tutorialRevealFraction = 0.5
 
+    @AppStorage(ProgressStorageKey.hasCompletedFirstGameTutorial) private var hasCompletedFirstGameTutorial = false
     @AppStorage(ProgressStorageKey.selectedTheme) private var storedTheme = AppTheme.system.rawValue
     @AppStorage(ProgressStorageKey.selectedLanguage) private var storedLanguage = AppLanguage.system.rawValue
     @StateObject private var purchaseManager = PurchaseManager()
@@ -31,9 +40,6 @@ struct ContentView: View {
     @State private var tiles: [PhraseTile]
     @State private var selectedTileIndex: Int?
     @State private var mistakes: Int
-    // Неверные буквы храним по числовому коду, иначе можно случайно заблокировать
-    // букву, которая нужна для другой ячейки, и сделать раунд непроходимым.
-    @State private var rejectedLettersByCode: [Int: Set<Character>]
     @State private var flashingWrongGuesses: Set<WrongGuess>
     @State private var roundStatus: RoundStatus
     @State private var isHintMode: Bool
@@ -50,13 +56,30 @@ struct ContentView: View {
     @State private var isProcessingContinueOffer = false
     @State private var isProcessingHintAd = false
     @State private var isShowingDailyHintToast = false
+    @State private var tutorialStep: FirstGameTutorialStep?
+    @State private var tutorialPrimaryTileIndex: Int?
+    @State private var tutorialHintTileIndex: Int?
+    @State private var isShowingTutorialCompletionToast = false
+    @State private var tutorialPulse = false
 
     init() {
         let selectedLanguage = AppLanguage(rawValue: UserDefaults.standard.string(forKey: ProgressStorageKey.selectedLanguage) ?? "") ?? .system
         let effectiveLanguage = AppLanguage.resolved(from: selectedLanguage)
         let loadedEntries = PhraseStore.load(language: effectiveLanguage)
         let snapshot = ProgressStore.load(for: effectiveLanguage, entries: loadedEntries)
-        let initialTiles = RoundBuilder.makeTiles(from: loadedEntries[snapshot.currentPhraseIndex].phrase, alphabet: effectiveLanguage.alphabet)
+        let hasCompletedTutorial = UserDefaults.standard.bool(forKey: ProgressStorageKey.hasCompletedFirstGameTutorial)
+        let shouldBoostTutorialStartLevel = Self.shouldBoostTutorialStartLevel(
+            hasCompletedTutorial: hasCompletedTutorial,
+            currentPhraseIndex: snapshot.currentPhraseIndex,
+            completedIndices: snapshot.completedIndices,
+            passedIndices: snapshot.passedIndices,
+            stats: snapshot.stats
+        )
+        let initialTiles = Self.makeRoundTiles(
+            from: loadedEntries[snapshot.currentPhraseIndex].phrase,
+            alphabet: effectiveLanguage.alphabet,
+            shouldBoostTutorialStartLevel: shouldBoostTutorialStartLevel
+        )
 
         _currentLanguage = State(initialValue: effectiveLanguage)
         _phraseEntries = State(initialValue: loadedEntries)
@@ -65,7 +88,6 @@ struct ContentView: View {
         _tiles = State(initialValue: initialTiles)
         _selectedTileIndex = State(initialValue: nil)
         _mistakes = State(initialValue: 0)
-        _rejectedLettersByCode = State(initialValue: [:])
         _flashingWrongGuesses = State(initialValue: [])
         _roundStatus = State(initialValue: .playing)
         _isHintMode = State(initialValue: false)
@@ -80,6 +102,11 @@ struct ContentView: View {
         _isProcessingContinueOffer = State(initialValue: false)
         _isProcessingHintAd = State(initialValue: false)
         _isShowingDailyHintToast = State(initialValue: false)
+        _tutorialStep = State(initialValue: nil)
+        _tutorialPrimaryTileIndex = State(initialValue: nil)
+        _tutorialHintTileIndex = State(initialValue: nil)
+        _isShowingTutorialCompletionToast = State(initialValue: false)
+        _tutorialPulse = State(initialValue: false)
     }
 
     var body: some View {
@@ -88,6 +115,11 @@ struct ContentView: View {
                 topHud
                     .padding(.horizontal, 10)
                     .padding(.top, 2)
+
+                if isFirstGameTutorialActive {
+                    tutorialCallout
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
 
                 if roundStatus == .lost {
                     roundStatusBanner
@@ -120,6 +152,8 @@ struct ContentView: View {
             .onAppear {
                 refreshFreeHintCredits()
                 persistProgress()
+                configureTutorialIfNeeded()
+                startTutorialPulseIfNeeded()
             }
             .overlay {
                 if isShowingSettings {
@@ -143,11 +177,18 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .top) {
-                if isShowingDailyHintToast {
-                    dailyHintToast
-                        .padding(.top, 12)
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                VStack(spacing: 10) {
+                    if isShowingDailyHintToast {
+                        dailyHintToast
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+
+                    if isShowingTutorialCompletionToast {
+                        tutorialCompletionToast
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
+                .padding(.top, 12)
             }
         }
         .preferredColorScheme(selectedTheme.colorScheme)
@@ -201,6 +242,50 @@ struct ContentView: View {
         .shadow(color: Color.black.opacity(0.08), radius: 14, y: 6)
     }
 
+    private var tutorialCompletionToast: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Text(currentLanguage.text(.tutorialCompleted))
+                .font(.footnote.weight(.semibold))
+                .multilineTextAlignment(.center)
+        }
+        .foregroundStyle(Color.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.green.opacity(0.25), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 14, y: 6)
+        .padding(.horizontal, 12)
+    }
+
+    private var tutorialCallout: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(currentLanguage.text(.tutorialTitle), systemImage: "hand.tap.fill")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(Color.orange)
+
+            Text(tutorialMessage)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 360, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.orange.opacity(0.28), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 16, y: 8)
+        .padding(.horizontal, 12)
+        .allowsHitTesting(false)
+    }
+
     private var settingsButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
@@ -218,11 +303,89 @@ struct ContentView: View {
                 )
         }
         .buttonStyle(.plain)
+        .disabled(isFirstGameTutorialActive)
+        .opacity(isFirstGameTutorialActive ? 0.45 : 1)
         .accessibilityLabel(currentLanguage.text(.settingsAccessibilityLabel))
     }
 
     private var selectedTheme: AppTheme {
         AppTheme(rawValue: storedTheme) ?? .system
+    }
+
+    private static func shouldBoostTutorialStartLevel(
+        hasCompletedTutorial: Bool,
+        currentPhraseIndex: Int,
+        completedIndices: Set<Int>,
+        passedIndices: Set<Int>,
+        stats: GlobalStatsSnapshot
+    ) -> Bool {
+        !hasCompletedTutorial
+            && currentPhraseIndex == 0
+            && completedIndices.isEmpty
+            && passedIndices.isEmpty
+            && stats.totalRounds == 0
+    }
+
+    private static func makeRoundTiles(from phrase: String, alphabet: [Character], shouldBoostTutorialStartLevel: Bool) -> [PhraseTile] {
+        let baseTiles = RoundBuilder.makeTiles(from: phrase, alphabet: alphabet)
+
+        guard shouldBoostTutorialStartLevel else {
+            return baseTiles
+        }
+
+        return boostTutorialOpenLetters(in: baseTiles)
+    }
+
+    private static func boostTutorialOpenLetters(in tiles: [PhraseTile]) -> [PhraseTile] {
+        var boostedTiles = tiles
+        let letterIndices = boostedTiles.indices.filter { boostedTiles[$0].isLetter }
+
+        guard letterIndices.count > 3 else {
+            return boostedTiles
+        }
+
+        let groupedIndices = Dictionary(grouping: letterIndices) { boostedTiles[$0].normalizedLetter! }
+        let preservedHiddenIndices = Set(
+            groupedIndices.values
+                .filter { $0.count >= 2 }
+                .sorted { lhs, rhs in
+                    if lhs.count != rhs.count {
+                        return lhs.count > rhs.count
+                    }
+
+                    return (lhs.first ?? 0) < (rhs.first ?? 0)
+                }
+                .first?
+                .prefix(2)
+                ?? letterIndices.prefix(2)
+        )
+
+        for index in preservedHiddenIndices {
+            boostedTiles[index].isOpen = false
+        }
+
+        let currentlyOpenCount = letterIndices.filter { boostedTiles[$0].isOpen }.count
+        let desiredOpenCount = min(
+            letterIndices.count - 2,
+            max(currentlyOpenCount, Int((Double(letterIndices.count) * tutorialRevealFraction).rounded(.up)))
+        )
+
+        guard currentlyOpenCount < desiredOpenCount else {
+            return boostedTiles
+        }
+
+        var openCount = currentlyOpenCount
+
+        for index in letterIndices where !preservedHiddenIndices.contains(index) && !boostedTiles[index].isOpen {
+            boostedTiles[index].isOpen = true
+            openCount += 1
+
+            if openCount >= desiredOpenCount {
+                break
+            }
+        }
+
+        return boostedTiles
     }
 
     private var selectedLanguageOption: AppLanguage {
@@ -252,9 +415,16 @@ struct ContentView: View {
 
         let loadedEntries = PhraseStore.load(language: resolvedLanguage)
         let snapshot = ProgressStore.load(for: resolvedLanguage, entries: loadedEntries)
-        let nextTiles = RoundBuilder.makeTiles(
+        let nextTiles = Self.makeRoundTiles(
             from: loadedEntries[snapshot.currentPhraseIndex].phrase,
-            alphabet: resolvedLanguage.alphabet
+            alphabet: resolvedLanguage.alphabet,
+            shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
+                hasCompletedTutorial: hasCompletedFirstGameTutorial,
+                currentPhraseIndex: snapshot.currentPhraseIndex,
+                completedIndices: snapshot.completedIndices,
+                passedIndices: snapshot.passedIndices,
+                stats: snapshot.stats
+            )
         )
 
         let updates = {
@@ -265,7 +435,6 @@ struct ContentView: View {
             tiles = nextTiles
             selectedTileIndex = nil
             mistakes = 0
-            rejectedLettersByCode = [:]
             flashingWrongGuesses = []
             roundStatus = .playing
             isHintMode = false
@@ -288,6 +457,8 @@ struct ContentView: View {
         } else {
             updates()
         }
+
+        configureTutorialIfNeeded(restart: true)
     }
 
     private var currentAuthor: String {
@@ -477,7 +648,9 @@ struct ContentView: View {
     }
 
     private var hintButton: some View {
-        Button {
+        let isTutorialHighlighted = tutorialStep == .openHintMode
+
+        return Button {
             toggleHintMode()
         } label: {
             HStack(spacing: 4) {
@@ -518,12 +691,21 @@ struct ContentView: View {
                         lineWidth: 1
                     )
             )
+            .overlay {
+                if isTutorialHighlighted {
+                    Capsule()
+                        .stroke(Color.yellow, lineWidth: 2)
+                        .shadow(color: Color.yellow.opacity(tutorialPulse ? 0.65 : 0.35), radius: tutorialPulse ? 16 : 8)
+                }
+            }
+            .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.04 : 1.0) : 1)
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.15), value: isHintMode)
         .animation(.easeInOut(duration: 0.15), value: freeHintCredits)
-        .disabled(!isHintAvailable || isProcessingHintAd)
-        .opacity(isHintAvailable || isHintMode ? 1 : 0.45)
+        .animation(.easeInOut(duration: 0.9), value: tutorialPulse)
+        .disabled(!canUseHintButton || isProcessingHintAd)
+        .opacity(canUseHintButton || isHintMode ? 1 : 0.45)
     }
 
     private func keyboardRow(_ row: KeyboardRow) -> some View {
@@ -547,12 +729,51 @@ struct ContentView: View {
         selectedTile?.code
     }
 
+    private var isFirstGameTutorialActive: Bool {
+        tutorialStep != nil && !hasCompletedFirstGameTutorial
+    }
+
+    private var tutorialMessage: String {
+        switch tutorialStep {
+        case .pickTile:
+            return currentLanguage.text(.tutorialPickTile)
+        case .enterLetter:
+            return currentLanguage.text(.tutorialEnterLetter)
+        case .openHintMode:
+            return currentLanguage.text(.tutorialHintButton)
+        case .useHint:
+            return currentLanguage.text(.tutorialHintTile)
+        case .none:
+            return ""
+        }
+    }
+
+    private var tutorialHintIsFree: Bool {
+        isFirstGameTutorialActive && (tutorialStep == .openHintMode || tutorialStep == .useHint)
+    }
+
+    private var tutorialTargetLetter: Character? {
+        guard let tutorialPrimaryTileIndex, tiles.indices.contains(tutorialPrimaryTileIndex) else {
+            return nil
+        }
+
+        return tiles[tutorialPrimaryTileIndex].normalizedLetter
+    }
+
+    private var canUseHintButton: Bool {
+        if !isFirstGameTutorialActive {
+            return isHintAvailable
+        }
+
+        return tutorialStep == .openHintMode
+    }
+
     private var isHintAvailable: Bool {
         roundStatus == .playing && tiles.contains { $0.isHiddenLetter }
     }
 
     private var needsAdForHint: Bool {
-        freeHintCredits == 0 && !purchaseManager.isAdsRemoved
+        !tutorialHintIsFree && freeHintCredits == 0 && !purchaseManager.isAdsRemoved
     }
 
     private var completedPhrasesProgress: String {
@@ -616,6 +837,7 @@ struct ContentView: View {
         } else {
             let isSelected = selectedTileIndex == tile.index
             let showCode = shouldShowCode(for: tile)
+            let isTutorialHighlighted = isTutorialHighlightedTile(tile)
 
             VStack(spacing: metrics.tileCodeSpacing) {
                 Button {
@@ -631,9 +853,18 @@ struct ContentView: View {
                             RoundedRectangle(cornerRadius: metrics.tileCornerRadius, style: .continuous)
                                 .stroke(tileBorderColor(for: tile, isSelected: isSelected), lineWidth: isSelected ? 1.5 : 1)
                         )
+                        .overlay {
+                            if isTutorialHighlighted {
+                                RoundedRectangle(cornerRadius: metrics.tileCornerRadius, style: .continuous)
+                                    .stroke(Color.yellow, lineWidth: 2)
+                                    .shadow(color: Color.yellow.opacity(tutorialPulse ? 0.65 : 0.35), radius: tutorialPulse ? 16 : 8)
+                            }
+                        }
+                        .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.08 : 1.02) : 1)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSelect(tile))
+                .animation(.easeInOut(duration: 0.9), value: tutorialPulse)
 
                 if showCode, let code = tile.code {
                     Text("\(code)")
@@ -656,6 +887,10 @@ struct ContentView: View {
             return .green.opacity(0.16)
         }
 
+        if isTutorialHighlightedTile(tile) {
+            return Color.yellow.opacity(isHintMode ? 0.28 : 0.18)
+        }
+
         if isHintMode && tile.isHiddenLetter {
             return Color.yellow.opacity(0.24)
         }
@@ -668,6 +903,10 @@ struct ContentView: View {
     }
 
     private func tileBorderColor(for tile: PhraseTile, isSelected: Bool) -> Color {
+        if isTutorialHighlightedTile(tile) {
+            return Color.yellow
+        }
+
         if isHintMode && tile.isHiddenLetter {
             return Color.yellow.opacity(0.8)
         }
@@ -684,7 +923,22 @@ struct ContentView: View {
     }
 
     private func canSelect(_ tile: PhraseTile) -> Bool {
-        roundStatus == .playing && tile.isHiddenLetter
+        guard roundStatus == .playing && tile.isHiddenLetter else {
+            return false
+        }
+
+        guard isFirstGameTutorialActive else {
+            return true
+        }
+
+        switch tutorialStep {
+        case .pickTile:
+            return tile.index == tutorialPrimaryTileIndex
+        case .useHint:
+            return isHintMode && tile.index == tutorialHintTileIndex
+        case .enterLetter, .openHintMode, .none:
+            return false
+        }
     }
 
     private func shouldShowCode(for tile: PhraseTile) -> Bool {
@@ -705,12 +959,21 @@ struct ContentView: View {
             return
         }
 
+        if tutorialStep == .pickTile {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                selectedTileIndex = tile.index
+                tutorialStep = .enterLetter
+            }
+            return
+        }
+
         selectedTileIndex = tile.index
     }
 
     private func keyboardKey(_ letter: Character) -> some View {
         let isVisible = keyboardVisibility(for: letter)
         let isWrong = isFlashingWrong(letter)
+        let isTutorialHighlighted = isTutorialHighlightedKey(letter)
 
         return Button {
             handleLetterTap(letter)
@@ -722,39 +985,52 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, minHeight: 38)
                 .background(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(isWrong ? Color.red : Color.accentColor.opacity(isVisible ? 0.12 : 0))
+                        .fill(
+                            isWrong
+                                ? Color.red
+                                : (isTutorialHighlighted ? Color.yellow.opacity(0.22) : Color.accentColor.opacity(isVisible ? 0.12 : 0))
+                        )
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(isWrong ? Color.red : Color.accentColor.opacity(isVisible ? 0.35 : 0), lineWidth: 1)
+                        .stroke(
+                            isWrong
+                                ? Color.red
+                                : (isTutorialHighlighted ? Color.yellow : Color.accentColor.opacity(isVisible ? 0.35 : 0)),
+                            lineWidth: isTutorialHighlighted ? 2 : 1
+                        )
                 )
+                .shadow(color: isTutorialHighlighted ? Color.yellow.opacity(tutorialPulse ? 0.55 : 0.25) : .clear, radius: tutorialPulse ? 14 : 8)
+                .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.06 : 1.0) : 1)
         }
         .buttonStyle(.plain)
         .disabled(!canTapKey(letter))
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible && canTapKey(letter))
+        .animation(.easeInOut(duration: 0.9), value: tutorialPulse)
     }
 
     private func keyboardVisibility(for letter: Character) -> Bool {
-        if isLetterSolved(letter) {
+        isLetterStillNeeded(letter)
+    }
+
+    private func isTutorialHighlightedTile(_ tile: PhraseTile) -> Bool {
+        guard isFirstGameTutorialActive else {
             return false
         }
 
-        guard let selectedCode else {
-            return true
+        switch tutorialStep {
+        case .pickTile, .enterLetter:
+            return tile.index == tutorialPrimaryTileIndex
+        case .useHint:
+            return tile.index == tutorialHintTileIndex
+        case .openHintMode, .none:
+            return false
         }
+    }
 
-        let wrongGuess = WrongGuess(code: selectedCode, letter: letter)
-        if flashingWrongGuesses.contains(wrongGuess) {
-            return true
-        }
-
-        if rejectedLettersByCode[selectedCode, default: []].contains(letter) {
-            let remainingHiddenTiles = tiles.filter { $0.normalizedLetter == letter && $0.isHiddenLetter }
-            return remainingHiddenTiles.count > 1
-        }
-
-        return true
+    private func isTutorialHighlightedKey(_ letter: Character) -> Bool {
+        isFirstGameTutorialActive && tutorialStep == .enterLetter && tutorialTargetLetter == letter
     }
 
     private func isFlashingWrong(_ letter: Character) -> Bool {
@@ -765,8 +1041,23 @@ struct ContentView: View {
         return flashingWrongGuesses.contains(WrongGuess(code: selectedCode, letter: letter))
     }
 
+    private func isLetterStillNeeded(_ letter: Character) -> Bool {
+        tiles.contains { $0.normalizedLetter == letter && $0.isHiddenLetter }
+    }
+
     private func canTapKey(_ letter: Character) -> Bool {
-        roundStatus == .playing && !isHintMode && selectedCode != nil && keyboardVisibility(for: letter)
+        guard roundStatus == .playing,
+              !isHintMode,
+              selectedCode != nil,
+              keyboardVisibility(for: letter) else {
+            return false
+        }
+
+        guard isFirstGameTutorialActive else {
+            return true
+        }
+
+        return tutorialStep == .enterLetter && tutorialTargetLetter == letter
     }
 
     private func handleLetterTap(_ letter: Character) {
@@ -774,16 +1065,21 @@ struct ContentView: View {
               let selectedTileIndex,
               tiles.indices.contains(selectedTileIndex),
               let selectedCode = tiles[selectedTileIndex].code,
-              keyboardVisibility(for: letter) else {
+              canTapKey(letter) else {
             return
         }
 
         if tiles[selectedTileIndex].normalizedLetter == letter {
-            let nextTileIndex = nextHiddenTileIndex(after: selectedTileIndex)
+            let isTutorialEntry = tutorialStep == .enterLetter
+            let nextTileIndex = isTutorialEntry ? nil : nextHiddenTileIndex(after: selectedTileIndex)
 
             withAnimation(.easeInOut(duration: 0.2)) {
                 tiles[selectedTileIndex].isOpen = true
                 self.selectedTileIndex = nextTileIndex
+            }
+
+            if isTutorialEntry {
+                advanceTutorialAfterCorrectLetter()
             }
 
             if allLettersOpen {
@@ -815,7 +1111,6 @@ struct ContentView: View {
 
             withAnimation(.easeInOut(duration: 0.2)) {
                 _ = flashingWrongGuesses.remove(wrongGuess)
-                _ = rejectedLettersByCode[selectedCode, default: []].insert(letter)
             }
         }
     }
@@ -885,10 +1180,31 @@ struct ContentView: View {
         selectedTileIndex = nil
         isShowingContinueOffer = false
         isProcessingContinueOffer = false
+        clearTutorialState()
         completeCurrentPhrase(didPass: false)
     }
 
     private func toggleHintMode() {
+        if isFirstGameTutorialActive {
+            guard tutorialStep == .openHintMode, isHintAvailable else {
+                return
+            }
+
+            let nextHintTileIndex = preferredTutorialHintTileIndex()
+
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isHintMode = nextHintTileIndex != nil
+                selectedTileIndex = nil
+                tutorialHintTileIndex = nextHintTileIndex
+                tutorialStep = nextHintTileIndex == nil ? nil : .useHint
+            }
+
+            if nextHintTileIndex == nil {
+                completeFirstGameTutorial()
+            }
+            return
+        }
+
         guard isHintAvailable else {
             return
         }
@@ -916,15 +1232,28 @@ struct ContentView: View {
             return
         }
 
+        let isTutorialHint = tutorialStep == .useHint
+
+        if isTutorialHint && index != tutorialHintTileIndex {
+            return
+        }
+
         withAnimation(.easeInOut(duration: 0.2)) {
             tiles[index].isOpen = true
             selectedTileIndex = nil
             isHintMode = false
-            roundHintsUsed += 1
+
+            if !isTutorialHint {
+                roundHintsUsed += 1
+            }
         }
 
-        if freeHintCredits > 0 {
+        if !isTutorialHint && freeHintCredits > 0 {
             freeHintCredits = ProgressStore.consumeFreeHint()
+        }
+
+        if isTutorialHint {
+            completeFirstGameTutorial()
         }
 
         if allLettersOpen {
@@ -980,16 +1309,139 @@ struct ContentView: View {
         }
     }
 
+    private func startTutorialPulseIfNeeded() {
+        guard !tutorialPulse else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+            tutorialPulse = true
+        }
+    }
+
+    private func configureTutorialIfNeeded(restart: Bool = false) {
+        if restart {
+            clearTutorialState()
+        }
+
+        guard Self.shouldBoostTutorialStartLevel(
+                hasCompletedTutorial: hasCompletedFirstGameTutorial,
+                currentPhraseIndex: currentPhraseIndex,
+                completedIndices: completedPhraseIndices,
+                passedIndices: passedPhraseIndices,
+                stats: statsSnapshot
+              ),
+              tutorialStep == nil,
+              roundStatus == .playing,
+              !phraseEntries.isEmpty,
+              let targetTileIndex = preferredTutorialPrimaryTileIndex() else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            tutorialPrimaryTileIndex = targetTileIndex
+            tutorialHintTileIndex = nil
+            selectedTileIndex = nil
+            isHintMode = false
+            tutorialStep = .pickTile
+        }
+    }
+
+    private func clearTutorialState() {
+        tutorialStep = nil
+        tutorialPrimaryTileIndex = nil
+        tutorialHintTileIndex = nil
+    }
+
+    private func preferredTutorialPrimaryTileIndex() -> Int? {
+        let hiddenLetterIndices = tiles.indices.filter { tiles[$0].isHiddenLetter }
+        guard !hiddenLetterIndices.isEmpty else {
+            return nil
+        }
+
+        return hiddenLetterIndices.first(where: { index in
+            guard let code = tiles[index].code else {
+                return false
+            }
+
+            return hiddenLetterIndices.contains { otherIndex in
+                otherIndex != index && tiles[otherIndex].code == code
+            }
+        }) ?? hiddenLetterIndices.first
+    }
+
+    private func preferredTutorialHintTileIndex() -> Int? {
+        let hiddenLetterIndices = tiles.indices.filter { tiles[$0].isHiddenLetter }
+        guard !hiddenLetterIndices.isEmpty else {
+            return nil
+        }
+
+        if let tutorialPrimaryTileIndex {
+            return hiddenLetterIndices.first(where: { $0 != tutorialPrimaryTileIndex }) ?? hiddenLetterIndices.first
+        }
+
+        return hiddenLetterIndices.first
+    }
+
+    private func advanceTutorialAfterCorrectLetter() {
+        guard tutorialStep == .enterLetter else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedTileIndex = nil
+            tutorialStep = .openHintMode
+        }
+    }
+
+    private func completeFirstGameTutorial() {
+        guard !hasCompletedFirstGameTutorial else {
+            clearTutorialState()
+            return
+        }
+
+        hasCompletedFirstGameTutorial = true
+        clearTutorialState()
+        showTutorialCompletionToast()
+    }
+
+    private func showTutorialCompletionToast() {
+        guard !isShowingTutorialCompletionToast else {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isShowingTutorialCompletionToast = true
+        }
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_400_000_000)
+
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isShowingTutorialCompletionToast = false
+            }
+        }
+    }
+
     private func loadNextRound() {
         let nextIndex = nextPhraseIndex(after: currentPhraseIndex)
-        let nextTiles = RoundBuilder.makeTiles(from: phraseEntries[nextIndex].phrase, alphabet: currentLanguage.alphabet)
+        let nextTiles = Self.makeRoundTiles(
+            from: phraseEntries[nextIndex].phrase,
+            alphabet: currentLanguage.alphabet,
+            shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
+                hasCompletedTutorial: hasCompletedFirstGameTutorial,
+                currentPhraseIndex: nextIndex,
+                completedIndices: completedPhraseIndices,
+                passedIndices: passedPhraseIndices,
+                stats: statsSnapshot
+            )
+        )
 
         withAnimation(.easeInOut(duration: 0.25)) {
             currentPhraseIndex = nextIndex
             tiles = nextTiles
             selectedTileIndex = nil
             mistakes = 0
-            rejectedLettersByCode = [:]
             flashingWrongGuesses = []
             roundStatus = .playing
             isHintMode = false
@@ -1003,6 +1455,7 @@ struct ContentView: View {
 
         refreshFreeHintCredits()
         persistProgress()
+        configureTutorialIfNeeded(restart: true)
     }
 
     private func completeCurrentPhrase(didPass: Bool) {
@@ -1076,7 +1529,18 @@ struct ContentView: View {
         }
 
         let firstIndex = 0
-        let firstTiles = RoundBuilder.makeTiles(from: phraseEntries[firstIndex].phrase, alphabet: currentLanguage.alphabet)
+        hasCompletedFirstGameTutorial = false
+        let firstTiles = Self.makeRoundTiles(
+            from: phraseEntries[firstIndex].phrase,
+            alphabet: currentLanguage.alphabet,
+            shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
+                hasCompletedTutorial: false,
+                currentPhraseIndex: firstIndex,
+                completedIndices: [],
+                passedIndices: [],
+                stats: .zero
+            )
+        )
 
         storedTheme = AppTheme.system.rawValue
         ProgressStore.reset(for: currentLanguage)
@@ -1086,7 +1550,6 @@ struct ContentView: View {
             tiles = firstTiles
             selectedTileIndex = nil
             mistakes = 0
-            rejectedLettersByCode = [:]
             flashingWrongGuesses = []
             roundStatus = .playing
             isHintMode = false
@@ -1103,6 +1566,7 @@ struct ContentView: View {
 
         refreshFreeHintCredits()
         persistProgress()
+        configureTutorialIfNeeded(restart: true)
         isShowingResetConfirmation = false
         isShowingSettings = false
     }

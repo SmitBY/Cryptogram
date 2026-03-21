@@ -205,6 +205,12 @@ enum AppText: String, Hashable {
     case continueOfferContinue
     case continueOfferDecline
     case dailyHintRewardToast
+    case tutorialTitle
+    case tutorialPickTile
+    case tutorialEnterLetter
+    case tutorialHintButton
+    case tutorialHintTile
+    case tutorialCompleted
     case languageSystem
     case themeSystem
     case themeLight
@@ -271,6 +277,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Продолжить",
             .continueOfferDecline: "Завершить уровень",
             .dailyHintRewardToast: "+1 подсказка за новый день",
+            .tutorialTitle: "Как играть",
+            .tutorialPickTile: "Сравнивай буквы с цифрами под ними: одинаковые цифры обозначают одну и ту же букву. Нажми на подсвеченную клетку.",
+            .tutorialEnterLetter: "Теперь выбери на клавиатуре букву для этой цифры.",
+            .tutorialHintButton: "Если не получается найти букву, нажми «Подсказка».",
+            .tutorialHintTile: "Подсказка включена. Нажми на подсвеченную клетку, чтобы открыть букву.",
+            .tutorialCompleted: "Отлично. Дальше разгадывай фразу самостоятельно.",
             .languageSystem: "Системный",
             .themeSystem: "Системная",
             .themeLight: "Светлая",
@@ -334,6 +346,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Continue",
             .continueOfferDecline: "End round",
             .dailyHintRewardToast: "+1 hint for a new day",
+            .tutorialTitle: "How to play",
+            .tutorialPickTile: "Match letters to the numbers below them: the same number always stands for the same letter. Tap the highlighted tile.",
+            .tutorialEnterLetter: "Now choose the letter for this number on the keyboard.",
+            .tutorialHintButton: "If you cannot find the letter, tap Hint.",
+            .tutorialHintTile: "Hint mode is on. Tap the highlighted tile to reveal a letter.",
+            .tutorialCompleted: "Great. Now finish the phrase on your own.",
             .languageSystem: "System",
             .themeSystem: "System",
             .themeLight: "Light",
@@ -397,6 +415,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Continuar",
             .continueOfferDecline: "Terminar ronda",
             .dailyHintRewardToast: "+1 pista por un nuevo dia",
+            .tutorialTitle: "Como jugar",
+            .tutorialPickTile: "Compara las letras con los numeros de abajo: el mismo numero siempre significa la misma letra. Toca la casilla resaltada.",
+            .tutorialEnterLetter: "Ahora elige en el teclado la letra para ese numero.",
+            .tutorialHintButton: "Si no encuentras la letra, toca Pista.",
+            .tutorialHintTile: "La pista esta activa. Toca la casilla resaltada para abrir una letra.",
+            .tutorialCompleted: "Perfecto. Ahora termina la frase por tu cuenta.",
             .languageSystem: "Sistema",
             .themeSystem: "Sistema",
             .themeLight: "Claro",
@@ -460,6 +484,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Fortsetzen",
             .continueOfferDecline: "Runde beenden",
             .dailyHintRewardToast: "+1 Hinweis fuer einen neuen Tag",
+            .tutorialTitle: "So spielst du",
+            .tutorialPickTile: "Vergleiche die Buchstaben mit den Zahlen darunter: dieselbe Zahl steht immer fuer denselben Buchstaben. Tippe auf das markierte Feld.",
+            .tutorialEnterLetter: "Waehle jetzt auf der Tastatur den Buchstaben fuer diese Zahl.",
+            .tutorialHintButton: "Wenn du den Buchstaben nicht findest, tippe auf Hinweis.",
+            .tutorialHintTile: "Der Hinweis ist aktiv. Tippe auf das markierte Feld, um einen Buchstaben aufzudecken.",
+            .tutorialCompleted: "Super. Jetzt loese den Rest der Phrase selbst.",
             .languageSystem: "System",
             .themeSystem: "System",
             .themeLight: "Hell",
@@ -523,6 +553,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Continuer",
             .continueOfferDecline: "Terminer la manche",
             .dailyHintRewardToast: "+1 indice pour un nouveau jour",
+            .tutorialTitle: "Comment jouer",
+            .tutorialPickTile: "Compare les lettres avec les chiffres en dessous : le meme chiffre correspond toujours a la meme lettre. Touchez la case mise en evidence.",
+            .tutorialEnterLetter: "Choisissez maintenant sur le clavier la lettre pour ce chiffre.",
+            .tutorialHintButton: "Si vous ne trouvez pas la lettre, touchez Indice.",
+            .tutorialHintTile: "L indice est actif. Touchez la case mise en evidence pour reveler une lettre.",
+            .tutorialCompleted: "Parfait. Continuez la phrase vous-meme.",
             .languageSystem: "Systeme",
             .themeSystem: "Systeme",
             .themeLight: "Clair",
@@ -586,6 +622,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Continua",
             .continueOfferDecline: "Termina round",
             .dailyHintRewardToast: "+1 suggerimento per un nuovo giorno",
+            .tutorialTitle: "Come si gioca",
+            .tutorialPickTile: "Confronta le lettere con i numeri sotto di loro: lo stesso numero indica sempre la stessa lettera. Tocca la casella evidenziata.",
+            .tutorialEnterLetter: "Adesso scegli sulla tastiera la lettera per questo numero.",
+            .tutorialHintButton: "Se non trovi la lettera, tocca Suggerimento.",
+            .tutorialHintTile: "Il suggerimento e attivo. Tocca la casella evidenziata per aprire una lettera.",
+            .tutorialCompleted: "Perfetto. Ora completa la frase da solo.",
             .languageSystem: "Sistema",
             .themeSystem: "Sistema",
             .themeLight: "Chiaro",
@@ -649,6 +691,12 @@ private enum AppLocalizer {
             .continueOfferContinue: "Continuar",
             .continueOfferDecline: "Terminar ronda",
             .dailyHintRewardToast: "+1 dica por um novo dia",
+            .tutorialTitle: "Como jogar",
+            .tutorialPickTile: "Compara as letras com os numeros por baixo: o mesmo numero representa sempre a mesma letra. Toca na casa destacada.",
+            .tutorialEnterLetter: "Agora escolhe no teclado a letra para esse numero.",
+            .tutorialHintButton: "Se nao encontrares a letra, toca em Dica.",
+            .tutorialHintTile: "A dica esta ativa. Toca na casa destacada para revelar uma letra.",
+            .tutorialCompleted: "Perfeito. Agora termina a frase sozinho.",
             .languageSystem: "Sistema",
             .themeSystem: "Sistema",
             .themeLight: "Claro",
