@@ -27,7 +27,7 @@ struct ContentView: View {
     private static let spaceWidth: CGFloat = 6
     private static let wordSpacing: CGFloat = 18
     private static let easyStartLevelCount = 10
-    private static let easyStartRevealFraction = 0.35
+    private static let easyStartRevealFraction = 0.55
     private static let tutorialRevealFraction = 0.5
 
     @AppStorage(ProgressStorageKey.hasCompletedFirstGameTutorial) private var hasCompletedFirstGameTutorial = false
@@ -159,24 +159,34 @@ struct ContentView: View {
                 startTutorialPulseIfNeeded()
             }
             .overlay {
-                if isShowingSettings {
-                    SettingsOverlayView(
-                        language: currentLanguage,
-                        selectedLanguage: selectedLanguageOption,
-                        theme: selectedTheme,
-                        stats: globalStatsSnapshot,
-                        purchaseManager: purchaseManager,
-                        onSelectLanguage: selectLanguage,
-                        onSelectTheme: { storedTheme = $0.rawValue },
-                        onPurchase: { await purchaseManager.purchaseRemoveAds() },
-                        onRestore: { await purchaseManager.restorePurchases() },
-                        onReset: { isShowingResetConfirmation = true },
-                        onClose: closeSettings
-                    )
-                } else if isShowingContinueOffer {
-                    continueOfferOverlay
-                } else if roundStatus == .won {
-                    solvedPhraseOverlay
+                ZStack {
+                    if isShowingSettings {
+                        SettingsOverlayView(
+                            language: currentLanguage,
+                            selectedLanguage: selectedLanguageOption,
+                            theme: selectedTheme,
+                            stats: globalStatsSnapshot,
+                            purchaseManager: purchaseManager,
+                            onSelectLanguage: selectLanguage,
+                            onSelectTheme: { storedTheme = $0.rawValue },
+                            onPurchase: { await purchaseManager.purchaseRemoveAds() },
+                            onRestore: { await purchaseManager.restorePurchases() },
+                            onReset: {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    isShowingResetConfirmation = true
+                                }
+                            },
+                            onClose: closeSettings
+                        )
+                    } else if isShowingContinueOffer {
+                        continueOfferOverlay
+                    } else if roundStatus == .won {
+                        solvedPhraseOverlay
+                    }
+
+                    if isShowingResetConfirmation {
+                        resetConfirmationOverlay
+                    }
                 }
             }
             .overlay(alignment: .top) {
@@ -197,18 +207,6 @@ struct ContentView: View {
         .preferredColorScheme(selectedTheme.colorScheme)
         .onChange(of: storedLanguage) { _, _ in
             applySelectedLanguage()
-        }
-        .confirmationDialog(
-            currentLanguage.text(.resetDialogTitle),
-            isPresented: $isShowingResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(currentLanguage.text(.resetDialogButton), role: .destructive) {
-                resetProgressAndSettings()
-            }
-            Button(currentLanguage.text(.cancelButton), role: .cancel) {}
-        } message: {
-            Text(currentLanguage.text(.resetDialogMessage))
         }
     }
 
@@ -410,6 +408,7 @@ struct ContentView: View {
 
     private func closeSettings() {
         withAnimation(.easeInOut(duration: 0.2)) {
+            isShowingResetConfirmation = false
             isShowingSettings = false
         }
     }
@@ -610,6 +609,65 @@ struct ContentView: View {
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
+    private var resetConfirmationOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.24)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isShowingResetConfirmation = false
+                    }
+                }
+
+            VStack(spacing: 16) {
+                Text(currentLanguage.text(.resetDialogTitle))
+                    .font(.headline.weight(.bold))
+                    .multilineTextAlignment(.center)
+
+                Text(currentLanguage.text(.resetDialogMessage))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Button(role: .destructive) {
+                    resetProgressAndSettings()
+                } label: {
+                    Text(currentLanguage.text(.resetDialogButton))
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isShowingResetConfirmation = false
+                    }
+                } label: {
+                    Text(currentLanguage.text(.cancelButton))
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(20)
+            .frame(maxWidth: 340)
+            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 22, y: 10)
+            .padding(.horizontal, 24)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .zIndex(20)
+    }
+
     private func boardCard(maxWidth: CGFloat) -> some View {
         let contentWidth = max(maxWidth - 20, 120)
         let metrics = boardMetrics(for: contentWidth)
@@ -711,6 +769,12 @@ struct ContentView: View {
                         .shadow(color: Color.yellow.opacity(tutorialPulse ? 0.65 : 0.35), radius: tutorialPulse ? 16 : 8)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if isTutorialHighlighted {
+                    tutorialPointer
+                        .offset(x: tutorialPulse ? 12 : 8, y: tutorialPulse ? 18 : 14)
+                }
+            }
             .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.04 : 1.0) : 1)
         }
         .buttonStyle(.plain)
@@ -744,6 +808,20 @@ struct ContentView: View {
 
     private var isFirstGameTutorialActive: Bool {
         tutorialStep != nil && !hasCompletedFirstGameTutorial
+    }
+
+    private var tutorialPointer: some View {
+        Image(systemName: "hand.point.up.left.fill")
+            .font(.system(size: 14, weight: .bold))
+            .foregroundStyle(Color.orange)
+            .padding(6)
+            .background(Color(uiColor: .systemBackground), in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(Color.orange.opacity(0.28), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 8, y: 4)
+            .allowsHitTesting(false)
     }
 
     private var tutorialMessage: String {
@@ -871,6 +949,12 @@ struct ContentView: View {
                                 RoundedRectangle(cornerRadius: metrics.tileCornerRadius, style: .continuous)
                                     .stroke(Color.yellow, lineWidth: 2)
                                     .shadow(color: Color.yellow.opacity(tutorialPulse ? 0.65 : 0.35), radius: tutorialPulse ? 16 : 8)
+                            }
+                        }
+                        .overlay(alignment: .bottomTrailing) {
+                            if isTutorialHighlighted {
+                                tutorialPointer
+                                    .offset(x: tutorialPulse ? 12 : 8, y: tutorialPulse ? 16 : 12)
                             }
                         }
                         .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.08 : 1.02) : 1)
@@ -1013,6 +1097,12 @@ struct ContentView: View {
                             lineWidth: isTutorialHighlighted ? 2 : 1
                         )
                 )
+                .overlay(alignment: .bottomTrailing) {
+                    if isTutorialHighlighted {
+                        tutorialPointer
+                            .offset(x: tutorialPulse ? 12 : 8, y: tutorialPulse ? 14 : 10)
+                    }
+                }
                 .shadow(color: isTutorialHighlighted ? Color.yellow.opacity(tutorialPulse ? 0.55 : 0.25) : .clear, radius: tutorialPulse ? 14 : 8)
                 .scaleEffect(isTutorialHighlighted ? (tutorialPulse ? 1.06 : 1.0) : 1)
         }
