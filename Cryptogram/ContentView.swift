@@ -26,8 +26,10 @@ struct ContentView: View {
     private static let rowSpacing: CGFloat = 10
     private static let spaceWidth: CGFloat = 6
     private static let wordSpacing: CGFloat = 18
-    private static let easyStartLevelCount = 10
-    private static let easyStartRevealFraction = 0.55
+    private static let easyStartTierSize = 10
+    private static let firstEasyStartRevealFraction = 0.55
+    private static let secondEasyStartRevealFraction = 0.40
+    private static let thirdEasyStartRevealFraction = 0.35
     private static let tutorialRevealFraction = 0.5
 
     @AppStorage(ProgressStorageKey.hasCompletedFirstGameTutorial) private var hasCompletedFirstGameTutorial = false
@@ -335,7 +337,7 @@ struct ContentView: View {
     ) -> [PhraseTile] {
         let baseTiles = RoundBuilder.makeTiles(from: phrase, alphabet: alphabet)
         let revealFraction = max(
-            currentPhraseIndex < easyStartLevelCount ? easyStartRevealFraction : 0,
+            easyStartRevealFraction(for: currentPhraseIndex),
             shouldBoostTutorialStartLevel ? tutorialRevealFraction : 0
         )
 
@@ -344,6 +346,19 @@ struct ContentView: View {
         }
 
         return boostOpenLetters(in: baseTiles, targetRevealFraction: revealFraction)
+    }
+
+    private static func easyStartRevealFraction(for currentPhraseIndex: Int) -> Double {
+        switch currentPhraseIndex {
+        case 0..<easyStartTierSize:
+            return firstEasyStartRevealFraction
+        case easyStartTierSize..<(easyStartTierSize * 2):
+            return secondEasyStartRevealFraction
+        case (easyStartTierSize * 2)..<(easyStartTierSize * 3):
+            return thirdEasyStartRevealFraction
+        default:
+            return 0
+        }
     }
 
     private static func boostOpenLetters(in tiles: [PhraseTile], targetRevealFraction: Double) -> [PhraseTile] {
