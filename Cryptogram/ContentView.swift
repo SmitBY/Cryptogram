@@ -26,6 +26,8 @@ struct ContentView: View {
     private static let rowSpacing: CGFloat = 10
     private static let spaceWidth: CGFloat = 6
     private static let wordSpacing: CGFloat = 18
+    private static let easyStartLevelCount = 10
+    private static let easyStartRevealFraction = 0.35
     private static let tutorialRevealFraction = 0.5
 
     @AppStorage(ProgressStorageKey.hasCompletedFirstGameTutorial) private var hasCompletedFirstGameTutorial = false
@@ -78,6 +80,7 @@ struct ContentView: View {
         let initialTiles = Self.makeRoundTiles(
             from: loadedEntries[snapshot.currentPhraseIndex].phrase,
             alphabet: effectiveLanguage.alphabet,
+            currentPhraseIndex: snapshot.currentPhraseIndex,
             shouldBoostTutorialStartLevel: shouldBoostTutorialStartLevel
         )
 
@@ -326,17 +329,26 @@ struct ContentView: View {
             && stats.totalRounds == 0
     }
 
-    private static func makeRoundTiles(from phrase: String, alphabet: [Character], shouldBoostTutorialStartLevel: Bool) -> [PhraseTile] {
+    private static func makeRoundTiles(
+        from phrase: String,
+        alphabet: [Character],
+        currentPhraseIndex: Int,
+        shouldBoostTutorialStartLevel: Bool
+    ) -> [PhraseTile] {
         let baseTiles = RoundBuilder.makeTiles(from: phrase, alphabet: alphabet)
+        let revealFraction = max(
+            currentPhraseIndex < easyStartLevelCount ? easyStartRevealFraction : 0,
+            shouldBoostTutorialStartLevel ? tutorialRevealFraction : 0
+        )
 
-        guard shouldBoostTutorialStartLevel else {
+        guard revealFraction > 0 else {
             return baseTiles
         }
 
-        return boostTutorialOpenLetters(in: baseTiles)
+        return boostOpenLetters(in: baseTiles, targetRevealFraction: revealFraction)
     }
 
-    private static func boostTutorialOpenLetters(in tiles: [PhraseTile]) -> [PhraseTile] {
+    private static func boostOpenLetters(in tiles: [PhraseTile], targetRevealFraction: Double) -> [PhraseTile] {
         var boostedTiles = tiles
         let letterIndices = boostedTiles.indices.filter { boostedTiles[$0].isLetter }
 
@@ -367,7 +379,7 @@ struct ContentView: View {
         let currentlyOpenCount = letterIndices.filter { boostedTiles[$0].isOpen }.count
         let desiredOpenCount = min(
             letterIndices.count - 2,
-            max(currentlyOpenCount, Int((Double(letterIndices.count) * tutorialRevealFraction).rounded(.up)))
+            max(currentlyOpenCount, Int((Double(letterIndices.count) * targetRevealFraction).rounded(.up)))
         )
 
         guard currentlyOpenCount < desiredOpenCount else {
@@ -418,6 +430,7 @@ struct ContentView: View {
         let nextTiles = Self.makeRoundTiles(
             from: loadedEntries[snapshot.currentPhraseIndex].phrase,
             alphabet: resolvedLanguage.alphabet,
+            currentPhraseIndex: snapshot.currentPhraseIndex,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: hasCompletedFirstGameTutorial,
                 currentPhraseIndex: snapshot.currentPhraseIndex,
@@ -1436,6 +1449,7 @@ struct ContentView: View {
         let nextTiles = Self.makeRoundTiles(
             from: phraseEntries[nextIndex].phrase,
             alphabet: currentLanguage.alphabet,
+            currentPhraseIndex: nextIndex,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: hasCompletedFirstGameTutorial,
                 currentPhraseIndex: nextIndex,
@@ -1483,6 +1497,10 @@ struct ContentView: View {
 
     private func nextPhraseIndex(after index: Int) -> Int {
         let allIndices = Array(phraseEntries.indices)
+        guard !allIndices.isEmpty else {
+            return 0
+        }
+
         let candidateIndices: [Int]
 
         if completedPhraseIndices.count < phraseEntries.count {
@@ -1492,16 +1510,13 @@ struct ContentView: View {
             candidateIndices = retryIndices.isEmpty ? allIndices : retryIndices
         }
 
-        let nonCurrentIndices = candidateIndices.filter { $0 != index }
-        let basePool = nonCurrentIndices.isEmpty ? candidateIndices : nonCurrentIndices
-        let currentAuthor = phraseEntries.indices.contains(index) ? phraseEntries[index].author : ""
+        let sortedCandidates = candidateIndices.sorted()
 
-        let differentAuthorPool = currentAuthor.isEmpty
-            ? []
-            : basePool.filter { phraseEntries[$0].author != currentAuthor }
-        let finalPool = differentAuthorPool.isEmpty ? basePool : differentAuthorPool
+        if let nextIndex = sortedCandidates.first(where: { $0 > index }) {
+            return nextIndex
+        }
 
-        return finalPool.randomElement() ?? 0
+        return sortedCandidates.first ?? 0
     }
 
     private func persistProgress() {
@@ -1541,6 +1556,7 @@ struct ContentView: View {
         let firstTiles = Self.makeRoundTiles(
             from: phraseEntries[firstIndex].phrase,
             alphabet: currentLanguage.alphabet,
+            currentPhraseIndex: firstIndex,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: false,
                 currentPhraseIndex: firstIndex,
