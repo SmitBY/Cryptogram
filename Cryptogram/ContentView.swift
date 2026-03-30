@@ -16,6 +16,19 @@ struct ContentView: View {
         case useHint
     }
 
+    private struct BoardLayout {
+        let cardWidth: CGFloat
+        let metrics: BoardMetrics
+        let rows: [[PhraseChunk]]
+
+        var cardHeight: CGFloat {
+            let rowCount = CGFloat(rows.count)
+            let rowsHeight = rowCount * metrics.tileHeight
+            let rowSpacingHeight = CGFloat(max(rows.count - 1, 0)) * metrics.rowSpacing
+            return rowsHeight + rowSpacingHeight + 28
+        }
+    }
+
     private static let maxMistakes = 3
     private static let tileWidth: CGFloat = 24
     private static let tileCellHeight: CGFloat = 30
@@ -131,10 +144,8 @@ struct ContentView: View {
                         .padding(.horizontal, 10)
                 }
 
-                ScrollView {
-                    boardCard(maxWidth: max(geometry.size.width - 20, 220))
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 10)
+                GeometryReader { boardGeometry in
+                    boardViewport(size: boardGeometry.size)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -683,10 +694,25 @@ struct ContentView: View {
         .zIndex(20)
     }
 
-    private func boardCard(maxWidth: CGFloat) -> some View {
-        let contentWidth = max(maxWidth - 20, 120)
-        let metrics = boardMetrics(for: contentWidth)
-        let rows = makeRows(maxWidth: contentWidth, metrics: metrics)
+    private func boardViewport(size: CGSize) -> some View {
+        let layout = boardLayout(for: max(size.width - 20, 220))
+        let shouldCenterBoard = layout.cardHeight <= size.height
+
+        return ScrollView {
+            VStack(spacing: 0) {
+                boardCard(layout: layout)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, shouldCenterBoard ? 0 : 10)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: size.height, alignment: shouldCenterBoard ? .center : .top)
+        }
+        .scrollDisabled(shouldCenterBoard)
+    }
+
+    private func boardCard(layout: BoardLayout) -> some View {
+        let metrics = layout.metrics
+        let rows = layout.rows
 
         return VStack(alignment: .center, spacing: 0) {
             VStack(alignment: .center, spacing: metrics.rowSpacing) {
@@ -701,7 +727,7 @@ struct ContentView: View {
             }
         }
         .padding(14)
-        .frame(width: maxWidth, alignment: .center)
+        .frame(width: layout.cardWidth, alignment: .center)
         .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -1812,6 +1838,13 @@ struct ContentView: View {
         case .none:
             return 0
         }
+    }
+
+    private func boardLayout(for maxWidth: CGFloat) -> BoardLayout {
+        let contentWidth = max(maxWidth - 20, 120)
+        let metrics = boardMetrics(for: contentWidth)
+        let rows = makeRows(maxWidth: contentWidth, metrics: metrics)
+        return BoardLayout(cardWidth: maxWidth, metrics: metrics, rows: rows)
     }
 
     private func boardMetrics(for maxWidth: CGFloat) -> BoardMetrics {
