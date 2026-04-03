@@ -67,11 +67,13 @@ struct ContentView: View {
     @State private var roundHintsUsed: Int
     @State private var freeHintCredits: Int
     @State private var isShowingSettings = false
+    @State private var isLevelDrawerPresented = false
     @State private var isShowingResetConfirmation = false
     @State private var isShowingContinueOffer = false
     @State private var hasUsedContinueOffer = false
     @State private var isProcessingContinueOffer = false
     @State private var isProcessingHintAd = false
+    @State private var isShowingLevelCompletionAd = false
     @State private var isShowingDailyHintToast = false
     @State private var tutorialStep: FirstGameTutorialStep?
     @State private var tutorialPrimaryTileIndex: Int?
@@ -92,12 +94,14 @@ struct ContentView: View {
             passedIndices: snapshot.passedIndices,
             stats: snapshot.stats
         )
-        let initialTiles = Self.makeRoundTiles(
+        let defaultTiles = Self.makeRoundTiles(
             from: loadedEntries[snapshot.currentPhraseIndex].phrase,
-            alphabet: effectiveLanguage.alphabet,
+            language: effectiveLanguage,
             currentPhraseIndex: snapshot.currentPhraseIndex,
             shouldBoostTutorialStartLevel: shouldBoostTutorialStartLevel
         )
+        let initialTiles = snapshot.currentRoundState?.restoredTiles() ?? defaultTiles
+        let initialMistakes = snapshot.currentRoundState.map { Self.restoreMistakes(from: $0) } ?? 0
 
         _currentLanguage = State(initialValue: effectiveLanguage)
         _phraseEntries = State(initialValue: loadedEntries)
@@ -105,7 +109,7 @@ struct ContentView: View {
         _currentPhraseIndex = State(initialValue: snapshot.currentPhraseIndex)
         _tiles = State(initialValue: initialTiles)
         _selectedTileIndex = State(initialValue: nil)
-        _mistakes = State(initialValue: 0)
+        _mistakes = State(initialValue: initialMistakes)
         _flashingWrongGuesses = State(initialValue: [])
         _roundStatus = State(initialValue: .playing)
         _isHintMode = State(initialValue: false)
@@ -193,6 +197,8 @@ struct ContentView: View {
                         )
                     } else if isShowingContinueOffer {
                         continueOfferOverlay
+                    } else if isShowingLevelCompletionAd {
+                        levelCompletionAdOverlay
                     } else if roundStatus == .won {
                         solvedPhraseOverlay
                     }
@@ -218,6 +224,17 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(selectedTheme.colorScheme)
+        .environment(\.locale, uiLocale)
+        .levelDrawerFeature(
+            isPresented: $isLevelDrawerPresented,
+            isEnabled: isLevelDrawerEnabled,
+            language: currentLanguage,
+            totalLevels: phraseEntries.count,
+            currentLevelIndex: currentPhraseIndex,
+            completedIndices: completedPhraseIndices,
+            passedIndices: passedPhraseIndices,
+            onSelectLevel: { loadPhrase(at: $0) }
+        )
         .onChange(of: storedLanguage) { _, _ in
             applySelectedLanguage()
         }
@@ -234,6 +251,11 @@ struct ContentView: View {
             )
 
             Spacer(minLength: 0)
+
+            if shouldShowQuickRemoveAdsButton {
+                quickRemoveAdsButton
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
 
             settingsButton
         }
@@ -322,8 +344,96 @@ struct ContentView: View {
         .accessibilityLabel(currentLanguage.text(.settingsAccessibilityLabel))
     }
 
+    private var quickRemoveAdsButton: some View {
+        Button(action: handleQuickRemoveAdsTap) {
+            HStack(spacing: 6) {
+                if isQuickRemoveAdsButtonBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.orange)
+                } else {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 15, weight: .bold))
+                }
+
+                if let quickRemoveAdsButtonTitle {
+                    Text(quickRemoveAdsButtonTitle)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+            }
+            .foregroundStyle(isQuickRemoveAdsButtonBusy ? Color.secondary : Color.orange)
+            .padding(.horizontal, quickRemoveAdsButtonTitle == nil ? 10 : 11)
+            .padding(.vertical, 7)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.orange.opacity(0.18), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isQuickRemoveAdsButtonBusy)
+        .accessibilityLabel(currentLanguage.text(.removeAdsTitle))
+        .accessibilityValue(quickRemoveAdsButtonAccessibilityValue)
+    }
+
     private var selectedTheme: AppTheme {
         AppTheme(rawValue: storedTheme) ?? .system
+    }
+
+    private var shouldShowQuickRemoveAdsButton: Bool {
+        !purchaseManager.isAdsRemoved && !isFirstGameTutorialActive
+    }
+
+    private var isQuickRemoveAdsButtonBusy: Bool {
+        purchaseManager.isPerformingAction || (purchaseManager.isLoadingProducts && purchaseManager.displayPrice == nil)
+    }
+
+    private var quickRemoveAdsButtonTitle: String? {
+        purchaseManager.displayPrice
+    }
+
+    private var quickRemoveAdsButtonAccessibilityValue: String {
+        if let displayPrice = purchaseManager.displayPrice {
+            return displayPrice
+        }
+
+        if purchaseManager.isLoadingProducts {
+            return currentLanguage.text(.purchaseLoadingShort)
+        }
+
+        return currentLanguage.text(.purchaseBuyButton)
+    }
+
+    private var isLevelDrawerEnabled: Bool {
+        !isShowingSettings
+            && !isShowingResetConfirmation
+            && !isShowingContinueOffer
+            && roundStatus != .won
+            && !isFirstGameTutorialActive
+    }
+
+    private var shouldShowLevelCompletionAd: Bool {
+        !purchaseManager.isAdsRemoved
+            && AdsConfiguration.Interstitial.shouldShowAfterCompletingLevel(currentPhraseIndex + 1)
+    }
+
+    private func handleQuickRemoveAdsTap() {
+        guard !purchaseManager.isPerformingAction else {
+            return
+        }
+
+        guard purchaseManager.removeAdsProduct != nil else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isShowingSettings = true
+            }
+            return
+        }
+
+        Task {
+            await purchaseManager.purchaseRemoveAds()
+        }
     }
 
     private static func shouldBoostTutorialStartLevel(
@@ -342,11 +452,11 @@ struct ContentView: View {
 
     private static func makeRoundTiles(
         from phrase: String,
-        alphabet: [Character],
+        language: AppLanguage,
         currentPhraseIndex: Int,
         shouldBoostTutorialStartLevel: Bool
     ) -> [PhraseTile] {
-        let baseTiles = RoundBuilder.makeTiles(from: phrase, alphabet: alphabet)
+        let baseTiles = RoundBuilder.makeTiles(from: phrase, language: language)
         let revealFraction = max(
             easyStartRevealFraction(for: currentPhraseIndex),
             shouldBoostTutorialStartLevel ? tutorialRevealFraction : 0
@@ -370,6 +480,10 @@ struct ContentView: View {
         default:
             return 0
         }
+    }
+
+    private static func restoreMistakes(from roundState: PersistedRoundState) -> Int {
+        min(max(roundState.mistakes, 0), Self.maxMistakes - 1)
     }
 
     private static func boostOpenLetters(in tiles: [PhraseTile], targetRevealFraction: Double) -> [PhraseTile] {
@@ -428,6 +542,10 @@ struct ContentView: View {
         AppLanguage(rawValue: storedLanguage) ?? .system
     }
 
+    private var uiLocale: Locale {
+        selectedLanguageOption == .system ? .autoupdatingCurrent : currentLanguage.localizationLocale
+    }
+
     private var globalStatsSnapshot: GlobalStatsSnapshot {
         statsSnapshot
     }
@@ -452,9 +570,9 @@ struct ContentView: View {
 
         let loadedEntries = PhraseStore.load(language: resolvedLanguage)
         let snapshot = ProgressStore.load(for: resolvedLanguage, entries: loadedEntries)
-        let nextTiles = Self.makeRoundTiles(
+        let defaultTiles = Self.makeRoundTiles(
             from: loadedEntries[snapshot.currentPhraseIndex].phrase,
-            alphabet: resolvedLanguage.alphabet,
+            language: resolvedLanguage,
             currentPhraseIndex: snapshot.currentPhraseIndex,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: hasCompletedFirstGameTutorial,
@@ -464,6 +582,8 @@ struct ContentView: View {
                 stats: snapshot.stats
             )
         )
+        let nextTiles = snapshot.currentRoundState?.restoredTiles() ?? defaultTiles
+        let restoredMistakes = snapshot.currentRoundState.map { Self.restoreMistakes(from: $0) } ?? 0
 
         let updates = {
             currentLanguage = resolvedLanguage
@@ -472,7 +592,7 @@ struct ContentView: View {
             currentPhraseIndex = snapshot.currentPhraseIndex
             tiles = nextTiles
             selectedTileIndex = nil
-            mistakes = 0
+            mistakes = restoredMistakes
             flashingWrongGuesses = []
             roundStatus = .playing
             isHintMode = false
@@ -496,6 +616,7 @@ struct ContentView: View {
             updates()
         }
 
+        persistProgress()
         configureTutorialIfNeeded(restart: true)
     }
 
@@ -633,6 +754,38 @@ struct ContentView: View {
             .padding(.horizontal, 24)
         }
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
+    private var levelCompletionAdOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.24)
+                .ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                Image(systemName: "play.tv.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.orange)
+
+                ProgressView()
+                    .controlSize(.large)
+
+                Text(currentLanguage.text(.purchaseLoadingShort))
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 24)
+            .frame(maxWidth: 240)
+            .background(Color(uiColor: .systemBackground), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: Color.black.opacity(0.12), radius: 22, y: 10)
+            .padding(.horizontal, 24)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        .zIndex(15)
     }
 
     private var resetConfirmationOverlay: some View {
@@ -1237,6 +1390,8 @@ struct ContentView: View {
             if allLettersOpen {
                 roundStatus = .won
                 completeCurrentPhrase(didPass: true)
+            } else {
+                persistProgress()
             }
 
             return
@@ -1256,6 +1411,8 @@ struct ContentView: View {
             } else {
                 finishRoundAsLoss()
             }
+        } else {
+            persistProgress()
         }
 
         Task { @MainActor in
@@ -1313,9 +1470,7 @@ struct ContentView: View {
         isProcessingContinueOffer = true
 
         Task { @MainActor in
-            if !purchaseManager.isAdsRemoved {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-            }
+            await awaitRewardedAdIfNeeded(for: .continueAfterMistake)
 
             withAnimation(.easeInOut(duration: 0.2)) {
                 mistakes = max(0, Self.maxMistakes - 1)
@@ -1323,6 +1478,8 @@ struct ContentView: View {
                 isShowingContinueOffer = false
                 isProcessingContinueOffer = false
             }
+
+            persistProgress()
         }
     }
 
@@ -1411,6 +1568,8 @@ struct ContentView: View {
         if allLettersOpen {
             roundStatus = .won
             completeCurrentPhrase(didPass: true)
+        } else {
+            persistProgress()
         }
     }
 
@@ -1422,7 +1581,7 @@ struct ContentView: View {
         isProcessingHintAd = true
 
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            await awaitRewardedAdIfNeeded(for: .hint)
 
             withAnimation(.easeInOut(duration: 0.2)) {
                 isProcessingHintAd = false
@@ -1430,6 +1589,28 @@ struct ContentView: View {
                 selectedTileIndex = nil
             }
         }
+    }
+
+    private func awaitRewardedAdIfNeeded(for placement: RewardedAdPlacement) async {
+        guard !purchaseManager.isAdsRemoved else {
+            return
+        }
+
+        // Replace the delay with the ad SDK call for `AdsConfiguration.Rewarded.unitID(for:)`.
+        try? await Task.sleep(
+            nanoseconds: AdsConfiguration.Rewarded.simulatedPresentationDelayNanoseconds(for: placement)
+        )
+    }
+
+    private func awaitInterstitialAdIfNeeded(for placement: InterstitialAdPlacement) async {
+        guard !purchaseManager.isAdsRemoved else {
+            return
+        }
+
+        // Replace the delay with the ad SDK call for `AdsConfiguration.Interstitial.unitID(for:)`.
+        try? await Task.sleep(
+            nanoseconds: AdsConfiguration.Interstitial.simulatedPresentationDelayNanoseconds(for: placement)
+        )
     }
 
     private func refreshFreeHintCredits() {
@@ -1575,23 +1756,27 @@ struct ContentView: View {
         }
     }
 
-    private func loadNextRound() {
-        let nextIndex = nextPhraseIndex(after: currentPhraseIndex)
+    private func loadPhrase(at index: Int, animated: Bool = true) {
+        guard phraseEntries.indices.contains(index) else {
+            return
+        }
+
         let nextTiles = Self.makeRoundTiles(
-            from: phraseEntries[nextIndex].phrase,
-            alphabet: currentLanguage.alphabet,
-            currentPhraseIndex: nextIndex,
+            from: phraseEntries[index].phrase,
+            language: currentLanguage,
+            currentPhraseIndex: index,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: hasCompletedFirstGameTutorial,
-                currentPhraseIndex: nextIndex,
+                currentPhraseIndex: index,
                 completedIndices: completedPhraseIndices,
                 passedIndices: passedPhraseIndices,
                 stats: statsSnapshot
             )
         )
 
-        withAnimation(.easeInOut(duration: 0.25)) {
-            currentPhraseIndex = nextIndex
+        let updates = {
+            isLevelDrawerPresented = false
+            currentPhraseIndex = index
             tiles = nextTiles
             selectedTileIndex = nil
             mistakes = 0
@@ -1602,13 +1787,46 @@ struct ContentView: View {
             hasUsedContinueOffer = false
             isProcessingContinueOffer = false
             isProcessingHintAd = false
+            isShowingLevelCompletionAd = false
             roundStartedAt = Date()
             roundHintsUsed = 0
+        }
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                updates()
+            }
+        } else {
+            updates()
         }
 
         refreshFreeHintCredits()
         persistProgress()
         configureTutorialIfNeeded(restart: true)
+    }
+
+    private func loadNextRound() {
+        let nextIndex = nextPhraseIndex(after: currentPhraseIndex)
+
+        guard !isShowingLevelCompletionAd else {
+            return
+        }
+
+        Task { @MainActor in
+            if shouldShowLevelCompletionAd {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isShowingLevelCompletionAd = true
+                }
+
+                await awaitInterstitialAdIfNeeded(for: .levelCompletion)
+
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isShowingLevelCompletionAd = false
+                }
+            }
+
+            loadPhrase(at: nextIndex)
+        }
     }
 
     private func completeCurrentPhrase(didPass: Bool) {
@@ -1657,7 +1875,25 @@ struct ContentView: View {
             completedIndices: completedPhraseIndices,
             passedIndices: passedPhraseIndices,
             datasetSignature: phraseDatasetSignature,
-            stats: statsSnapshot
+            stats: statsSnapshot,
+            currentRoundState: persistedRoundState
+        )
+    }
+
+    private var persistedRoundState: PersistedRoundState? {
+        guard roundStatus == .playing,
+              !isShowingContinueOffer,
+              !isProcessingContinueOffer,
+              !isProcessingHintAd,
+              phraseEntries.indices.contains(currentPhraseIndex),
+              mistakes < Self.maxMistakes else {
+            return nil
+        }
+
+        return PersistedRoundState(
+            phraseIndex: currentPhraseIndex,
+            mistakes: mistakes,
+            tiles: tiles
         )
     }
 
@@ -1686,7 +1922,7 @@ struct ContentView: View {
         hasCompletedFirstGameTutorial = false
         let firstTiles = Self.makeRoundTiles(
             from: phraseEntries[firstIndex].phrase,
-            alphabet: currentLanguage.alphabet,
+            language: currentLanguage,
             currentPhraseIndex: firstIndex,
             shouldBoostTutorialStartLevel: Self.shouldBoostTutorialStartLevel(
                 hasCompletedTutorial: false,
@@ -1712,6 +1948,7 @@ struct ContentView: View {
             hasUsedContinueOffer = false
             isProcessingContinueOffer = false
             isProcessingHintAd = false
+            isShowingLevelCompletionAd = false
             completedPhraseIndices = []
             passedPhraseIndices = []
             statsSnapshot = .zero

@@ -5,6 +5,7 @@ enum ProgressStorageKey {
     static let completedPhraseIndices = "progress.completedPhraseIndices"
     static let passedPhraseIndices = "progress.passedPhraseIndices"
     static let datasetSignature = "progress.datasetSignature"
+    static let currentRoundState = "progress.currentRoundState"
     static let hasCompletedFirstGameTutorial = "tutorial.hasCompletedFirstGameTutorial"
     static let selectedTheme = "settings.selectedTheme"
     static let selectedLanguage = "settings.selectedLanguage"
@@ -60,11 +61,82 @@ struct LanguageProgressSnapshot {
     let completedIndices: Set<Int>
     let passedIndices: Set<Int>
     let stats: GlobalStatsSnapshot
+    let currentRoundState: PersistedRoundState?
 }
 
 struct FreeHintRefreshResult {
     let credits: Int
     let didGrantDailyReward: Bool
+}
+
+struct PersistedRoundTile: Codable {
+    let index: Int
+    let displayCharacter: String
+    let normalizedLetter: String?
+    let code: Int?
+    let isOpen: Bool
+
+    init(tile: PhraseTile) {
+        index = tile.index
+        displayCharacter = String(tile.displayCharacter)
+        normalizedLetter = tile.normalizedLetter.map(String.init)
+        code = tile.code
+        isOpen = tile.isOpen
+    }
+
+    var phraseTile: PhraseTile? {
+        guard displayCharacter.count == 1,
+              let displayCharacter = displayCharacter.first else {
+            return nil
+        }
+
+        let restoredNormalizedLetter: Character?
+        if let normalizedLetterValue = normalizedLetter {
+            guard normalizedLetterValue.count == 1,
+                  let restoredLetter = normalizedLetterValue.first else {
+                return nil
+            }
+            restoredNormalizedLetter = restoredLetter
+        } else {
+            restoredNormalizedLetter = nil
+        }
+
+        return PhraseTile(
+            index: index,
+            displayCharacter: displayCharacter,
+            normalizedLetter: restoredNormalizedLetter,
+            code: code,
+            isOpen: isOpen
+        )
+    }
+}
+
+struct PersistedRoundState: Codable {
+    let phraseIndex: Int
+    let mistakes: Int
+    let tiles: [PersistedRoundTile]
+
+    init(phraseIndex: Int, mistakes: Int, tiles: [PhraseTile]) {
+        self.phraseIndex = phraseIndex
+        self.mistakes = mistakes
+        self.tiles = tiles.map(PersistedRoundTile.init)
+    }
+
+    func restoredTiles() -> [PhraseTile]? {
+        let restoredTiles = tiles.compactMap(\.phraseTile)
+        guard restoredTiles.count == tiles.count else {
+            return nil
+        }
+
+        let expectedIndices = Array(restoredTiles.indices)
+        guard zip(restoredTiles, expectedIndices).allSatisfy({ pair in
+            pair.0.index == pair.1
+        }) else {
+            return nil
+        }
+
+        return restoredTiles
+    }
 }
 
 enum ProgressStore {
@@ -107,12 +179,21 @@ enum ProgressStore {
             bestPassedDuration: shouldResetProgress ? 0 : userDefaults.double(forKey: key(ProgressStorageKey.bestPassedDuration, language: language))
         )
 
+        let currentRoundState = shouldResetProgress
+            ? nil
+            : loadCurrentRoundState(
+                for: language,
+                currentPhraseIndex: initialIndex,
+                userDefaults: userDefaults
+            )
+
         return LanguageProgressSnapshot(
             datasetSignature: datasetSignature,
             currentPhraseIndex: initialIndex,
             completedIndices: completedIndices,
             passedIndices: passedIndices,
-            stats: stats
+            stats: stats,
+            currentRoundState: currentRoundState
         )
     }
 
@@ -123,6 +204,7 @@ enum ProgressStore {
         passedIndices: Set<Int>,
         datasetSignature: String,
         stats: GlobalStatsSnapshot,
+        currentRoundState: PersistedRoundState?,
         userDefaults: UserDefaults = .standard
     ) {
         userDefaults.set(currentPhraseIndex, forKey: key(ProgressStorageKey.currentPhraseIndex, language: language))
@@ -135,6 +217,14 @@ enum ProgressStore {
         userDefaults.set(stats.totalDuration, forKey: key(ProgressStorageKey.totalDuration, language: language))
         userDefaults.set(stats.totalHints, forKey: key(ProgressStorageKey.totalHints, language: language))
         userDefaults.set(stats.bestPassedDuration, forKey: key(ProgressStorageKey.bestPassedDuration, language: language))
+
+        let currentRoundStateKey = key(ProgressStorageKey.currentRoundState, language: language)
+        if let currentRoundState,
+           let encodedRoundState = try? JSONEncoder().encode(currentRoundState) {
+            userDefaults.set(encodedRoundState, forKey: currentRoundStateKey)
+        } else {
+            userDefaults.removeObject(forKey: currentRoundStateKey)
+        }
     }
 
     static func reset(for language: AppLanguage, userDefaults: UserDefaults = .standard) {
@@ -183,6 +273,7 @@ enum ProgressStore {
         userDefaults.removeObject(forKey: key(ProgressStorageKey.completedPhraseIndices, language: language))
         userDefaults.removeObject(forKey: key(ProgressStorageKey.passedPhraseIndices, language: language))
         userDefaults.removeObject(forKey: key(ProgressStorageKey.datasetSignature, language: language))
+        userDefaults.removeObject(forKey: key(ProgressStorageKey.currentRoundState, language: language))
         userDefaults.removeObject(forKey: key(ProgressStorageKey.totalRounds, language: language))
         userDefaults.removeObject(forKey: key(ProgressStorageKey.totalPassedRounds, language: language))
         userDefaults.removeObject(forKey: key(ProgressStorageKey.totalMistakes, language: language))
@@ -202,6 +293,24 @@ enum ProgressStore {
         let month = components.month ?? 0
         let day = components.day ?? 0
         return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    private static func loadCurrentRoundState(
+        for language: AppLanguage,
+        currentPhraseIndex: Int,
+        userDefaults: UserDefaults = .standard
+    ) -> PersistedRoundState? {
+        let roundStateKey = key(ProgressStorageKey.currentRoundState, language: language)
+        guard let roundStateData = userDefaults.data(forKey: roundStateKey),
+              let roundState = try? JSONDecoder().decode(PersistedRoundState.self, from: roundStateData),
+              roundState.phraseIndex == currentPhraseIndex,
+              roundState.mistakes >= 0,
+              roundState.restoredTiles() != nil else {
+            userDefaults.removeObject(forKey: roundStateKey)
+            return nil
+        }
+
+        return roundState
     }
 
     private static func key(_ baseKey: String, language: AppLanguage) -> String {

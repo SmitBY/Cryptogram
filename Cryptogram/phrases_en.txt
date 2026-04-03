@@ -1,12 +1,17 @@
-TIME IS MONEY
-BETTER LATE THAN NEVER
-KNOWLEDGE IS POWER
-ACTIONS SPEAK LOUDER THAN WORDS
-PRACTICE MAKES PERFECT
-WHEN IN ROME DO AS THE ROMANS DO
-THE PEN IS MIGHTIER THAN THE SWORD||EDWARD BULWER LYTTON
-TO BE OR NOT TO BE||WILLIAM SHAKESPEARE
-FORTUNE FAVORS THE BOLD
-HONESTY IS THE BEST POLICY
-THE EARLY BIRD CATCHES THE WORM
-A PICTURE IS WORTH A THOUSAND WORDS
+Time is money.
+Better late than never.
+Knowledge is power.
+Actions speak louder than words.
+Practice makes perfect.
+When in Rome, do as the Romans do.
+The pen is mightier than the sword.||Edward Bulwer-Lytton
+To be, or not to be.||William Shakespeare
+Fortune favors the bold.
+Honesty is the best policy.
+The early bird catches the worm.
+A picture is worth a thousand words.
+A stitch in time saves nine.
+Don't put all your eggs in one basket.
+Every cloud has a silver lining.
+Two heads are better than one.
+Time waits for no one.

@@ -17,7 +17,8 @@ Then launch via Xcode or `xcrun simctl` if you prefer the command line.
 For device deployment use `ios-deploy --bundle <path>/Cryptogram.app --justlaunch` after building with `-destination 'generic/platform=iOS'`.
 
 ## Localization
-Strings live in `AppLocalization.swift`; add any new labels to the per-language dictionaries there.
+UI strings live in `Localizable.xcstrings`.
+`AppLocalization.swift` stores language metadata and the helper that resolves catalog strings for the app-selected locale.
 
 ## Maintenance
-To adjust gameplay, hint logic, or phrase sets edit `ProgressSupport.swift`, `PhraseStore.swift`, and the `.txt` files that carry the phrase banks.
+To adjust gameplay, hint logic, or phrase sets edit `ProgressSupport.swift`, `PhraseStore.swift`, and the per-language `phrases*.txt` banks. Keep phrase banks native to each language instead of translating one source list across locales.

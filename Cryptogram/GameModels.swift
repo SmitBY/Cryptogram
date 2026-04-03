@@ -79,7 +79,7 @@ struct PhraseTile: Identifiable {
             return displayCharacter
         }
 
-        return normalizedLetter ?? displayCharacter
+        return displayCharacter
     }
 }
 

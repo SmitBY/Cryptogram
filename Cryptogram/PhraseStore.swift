@@ -9,11 +9,6 @@ enum PhraseStore {
         pattern: "\\[\\d+\\]",
         options: []
     )
-    private static let combiningMarksRegex = try! NSRegularExpression(
-        pattern: "\\p{Mn}+",
-        options: []
-    )
-
     static func load(language: AppLanguage) -> [PhraseEntry] {
         guard let url = Bundle.main.url(forResource: language.phraseFileName, withExtension: "txt"),
               let content = try? String(contentsOf: url, encoding: .utf8) else {
@@ -46,45 +41,45 @@ enum PhraseStore {
         switch language {
         case .ru:
             return [
-                PhraseEntry(phrase: "Делу время - потехе час", author: ""),
-                PhraseEntry(phrase: "Без труда не выловишь и рыбку из пруда", author: ""),
-                PhraseEntry(phrase: "В гостях хорошо, а дома лучше", author: "")
+                PhraseEntry(phrase: "Делу время — потехе час.", author: ""),
+                PhraseEntry(phrase: "Без труда не выловишь и рыбку из пруда.", author: ""),
+                PhraseEntry(phrase: "В гостях хорошо, а дома лучше.", author: "")
             ]
         case .en:
             return [
-                PhraseEntry(phrase: "Time is money", author: ""),
-                PhraseEntry(phrase: "Better late than never", author: ""),
-                PhraseEntry(phrase: "Knowledge is power", author: "")
+                PhraseEntry(phrase: "Time is money.", author: ""),
+                PhraseEntry(phrase: "Better late than never.", author: ""),
+                PhraseEntry(phrase: "Knowledge is power.", author: "")
             ]
         case .es:
             return [
-                PhraseEntry(phrase: "El tiempo es oro", author: ""),
-                PhraseEntry(phrase: "Mas vale tarde que nunca", author: ""),
-                PhraseEntry(phrase: "La union hace la fuerza", author: "")
+                PhraseEntry(phrase: "El tiempo es oro.", author: ""),
+                PhraseEntry(phrase: "Más vale tarde que nunca.", author: ""),
+                PhraseEntry(phrase: "La unión hace la fuerza.", author: "")
             ]
         case .de:
             return [
-                PhraseEntry(phrase: "Zeit ist geld", author: ""),
-                PhraseEntry(phrase: "Ende gut alles gut", author: ""),
-                PhraseEntry(phrase: "Ohne fleiss kein preis", author: "")
+                PhraseEntry(phrase: "Zeit ist Geld.", author: ""),
+                PhraseEntry(phrase: "Ende gut, alles gut.", author: ""),
+                PhraseEntry(phrase: "Ohne Fleiß kein Preis.", author: "")
             ]
         case .fr:
             return [
-                PhraseEntry(phrase: "Je pense donc je suis", author: "Rene Descartes"),
-                PhraseEntry(phrase: "Qui vivra verra", author: ""),
-                PhraseEntry(phrase: "Mieux vaut tard que jamais", author: "")
+                PhraseEntry(phrase: "Je pense, donc je suis.", author: "René Descartes"),
+                PhraseEntry(phrase: "Qui vivra verra.", author: ""),
+                PhraseEntry(phrase: "Mieux vaut tard que jamais.", author: "")
             ]
         case .it:
             return [
-                PhraseEntry(phrase: "Il tempo e denaro", author: ""),
-                PhraseEntry(phrase: "Volere e potere", author: ""),
-                PhraseEntry(phrase: "Tutte le strade portano a Roma", author: "")
+                PhraseEntry(phrase: "Il tempo è denaro.", author: ""),
+                PhraseEntry(phrase: "Volere è potere.", author: ""),
+                PhraseEntry(phrase: "Tutte le strade portano a Roma.", author: "")
             ]
         case .pt:
             return [
-                PhraseEntry(phrase: "O tempo e ouro", author: ""),
-                PhraseEntry(phrase: "A uniao faz a forca", author: ""),
-                PhraseEntry(phrase: "Antes tarde do que nunca", author: "")
+                PhraseEntry(phrase: "O tempo é ouro.", author: ""),
+                PhraseEntry(phrase: "A união faz a força.", author: ""),
+                PhraseEntry(phrase: "Antes tarde do que nunca.", author: "")
             ]
         case .system:
             return fallbackEntries(for: AppLanguage.resolved(from: .system))
@@ -106,9 +101,7 @@ enum PhraseStore {
         let refRange = NSRange(text.startIndex..<text.endIndex, in: text)
         text = wikiRefRegex.stringByReplacingMatches(in: text, options: [], range: refRange, withTemplate: "")
 
-        let marksRange = NSRange(text.startIndex..<text.endIndex, in: text)
-        text = combiningMarksRegex.stringByReplacingMatches(in: text, options: [], range: marksRange, withTemplate: "")
-
+        text = text.precomposedStringWithCanonicalMapping
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }

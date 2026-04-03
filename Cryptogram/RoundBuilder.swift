@@ -1,16 +1,14 @@
 import Foundation
 
 enum RoundBuilder {
-    static func makeTiles(from phrase: String, alphabet: [Character]) -> [PhraseTile] {
-        let normalizedPhrase = phrase
-            .replacingOccurrences(of: "Ё", with: "Е")
-            .replacingOccurrences(of: "ё", with: "е")
-
+    static func makeTiles(from phrase: String, language: AppLanguage) -> [PhraseTile] {
+        let alphabet = language.alphabet
+        let locale = language.localizationLocale
         let shuffledCodes = Array(1...alphabet.count).shuffled()
         let codeMap = Dictionary(uniqueKeysWithValues: zip(alphabet, shuffledCodes))
 
-        var tiles = normalizedPhrase.enumerated().map { offset, character in
-            let normalizedLetter = normalized(character, alphabet: alphabet)
+        var tiles = phrase.enumerated().map { offset, character in
+            let normalizedLetter = normalized(character, alphabet: alphabet, locale: locale)
 
             return PhraseTile(
                 index: offset,
@@ -39,13 +37,14 @@ enum RoundBuilder {
         return tiles
     }
 
-    private static func normalized(_ character: Character, alphabet: [Character]) -> Character? {
-        let uppercased = String(character)
+    private static func normalized(_ character: Character, alphabet: [Character], locale: Locale) -> Character? {
+        let folded = String(character)
             .replacingOccurrences(of: "Ё", with: "Е")
             .replacingOccurrences(of: "ё", with: "е")
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: locale)
             .uppercased()
 
-        guard let letter = uppercased.first, alphabet.contains(letter) else {
+        guard let letter = folded.first, alphabet.contains(letter) else {
             return nil
         }
 
